@@ -185,3 +185,36 @@ Gemini - Arquitectura P2P y sistema de reputación
 MamangaMaster - Desarrollo e integración
 
 Un Mamangá solo es un bicho; un enjambre es una fuerza de la naturaleza que nadie puede apagar. 🐝🚀
+
+
+
+Comandos Principales
+
+maia---->Iniciar MaIA
+enjambre init-----> Levantar hidden service Tor
+enjambre estado----->Ver estado del nodo y peers
+enjambre unirse <onion> ------->Unirse a otro nodo
+enjambre escanear <objetivo> ----->Escaneo distribuido en el enjambre
+ipreal <dominio>------>Buscar IP real detrás de Cloudflare
+reputacion-------->Mostrar reputación del enjambre
+anonimato test----------->Probar Anonsurf
+nmap <objetivo>---------->Escaneo rápido
+!ejecutar <comando>---------->Ejecutar comando con confirmación
+
+Modo Conversacional
+
+Además de los comandos específicos, MaIA cuenta con un modo conversacional inteligente:Solo escribí cualquier cosa y MaIA te responderá como una compañera de equipo argentina.
+Habla de forma directa, práctica y con onda correntina ("che", "socio", "").
+Te explica técnicas de auditoría, recomienda herramientas, ayuda a interpretar resultados de escaneos y da consejos de seguridad.
+No ejecuta comandos automáticamente. Si querés que ejecute algo, debés usar explícitamente el prefijo !ejecutar comando.
+
+Ejemplos de uso en modo conversacional:
+¿Cómo hago para encontrar la IP real de un dominio protegido por Cloudflare?
+Explicame cómo funciona el sistema de reputación asimétrica
+¿Qué diferencias hay entre nmap -F y nmap -p- ?
+Recomendame wordlists buenas para gobuster
+¿Es seguro usar Anonsurf en producción?
+
+MaIA está pensada para ser tu compañera de auditoría, no solo un launcher de herramientas.
+
+
