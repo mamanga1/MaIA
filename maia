@@ -1,0 +1,389 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+🐝 MaIA v5.20 - MAMANGA INTELLIGENCE ASSISTANT
+Soberanía tecnológica o nada. 🧉🚀
+"""
+
+import os
+import sys
+import io
+import json
+import requests
+import time
+import subprocess
+import re
+import socket
+import threading
+import http.server
+import socketserver
+from datetime import datetime
+
+# ==================== CONFIGURACIÓN ====================
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+# Cargar API key desde variable de entorno o archivo
+API_KEY = os.getenv("API_KEY", "sk-or-v1-tu-api-key-aqui")
+MODELO = "mistralai/mixtral-8x7b-instruct"
+URL_API = "https://openrouter.ai/api/v1/chat/completions"
+LOG_FILE = os.path.expanduser("~/auditoria_mamanga.log")
+
+PROXIES_TOR = {'http': 'socks5h://127.0.0.1:9050', 'https': 'socks5h://127.0.0.1:9050'}
+ENJAMBRE_DIR = os.path.expanduser("~/.maia")
+ONION_DIR = "/var/lib/tor/maia"
+PEERS_FILE = os.path.join(ENJAMBRE_DIR, "peers.json")
+HALLZGOS_FILE = os.path.join(ENJAMBRE_DIR, "hallazgos.json")
+REPUTACION_FILE = os.path.join(ENJAMBRE_DIR, "reputacion.json")
+PUERTO_P2P = 9876
+
+# ==================== RESTAURAR DNS ====================
+def restaurar_dns():
+    try:
+        os.system("sudo chattr -i /etc/resolv.conf 2>/dev/null")
+        os.system("sudo rm /etc/resolv.conf 2>/dev/null")
+        with open("/tmp/resolv.conf.tmp", "w") as f:
+            f.write("nameserver 1.1.1.1\nnameserver 8.8.8.8\n")
+        os.system("sudo cp /tmp/resolv.conf.tmp /etc/resolv.conf")
+        os.system("sudo chattr +i /etc/resolv.conf")
+    except:
+        pass
+
+# ==================== REPUTACIÓN ====================
+def cargar_reputacion():
+    if os.path.exists(REPUTACION_FILE):
+        try:
+            with open(REPUTACION_FILE, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return {"nodos": {}, "config": {"confianza_inicial": 50, "voto_positivo": 10, "voto_negativo": -25, "umbral_confiable": 75, "umbral_sospechoso": 25}}
+
+def guardar_reputacion(rep):
+    os.makedirs(ENJAMBRE_DIR, exist_ok=True)
+    with open(REPUTACION_FILE, "w") as f:
+        json.dump(rep, f, indent=2)
+
+def actualizar_reputacion(nodo_id, cambio, motivo):
+    rep = cargar_reputacion()
+    if nodo_id not in rep["nodos"]:
+        rep["nodos"][nodo_id] = {"confianza": rep["config"]["confianza_inicial"], "votos_positivos": 0, "votos_negativos": 0, "historial": []}
+    n = rep["nodos"][nodo_id]
+    n["confianza"] = max(0, min(100, n["confianza"] + cambio))
+    if cambio > 0: n["votos_positivos"] += 1
+    else: n["votos_negativos"] += 1
+    n["historial"].append({"timestamp": datetime.now().strftime("%H:%M:%S"), "cambio": cambio, "motivo": motivo})
+    n["historial"] = n["historial"][-10]
+    guardar_reputacion(rep)
+    return n["confianza"]
+
+def verificar_hallazgo_tecnico(dominio, ip):
+    cmd = f"curl -s -o /dev/null -w '%{{http_code}}' --max-time 7 http://{ip} -H 'Host: {dominio}'"
+    try:
+        status = subprocess.check_output(cmd, shell=True).decode().strip()
+        return status in ["200", "301", "302", "403", "404"]
+    except:
+        return False
+
+def mostrar_reputacion():
+    rep = cargar_reputacion()
+    print("\n⭐ REPUTACIÓN DEL ENJAMBRE")
+    print(f"Configuración: +{rep['config']['voto_positivo']} / {rep['config']['voto_negativo']}")
+    if not rep["nodos"]:
+        print("   ❌ No hay nodos registrados")
+        return
+    for nid, data in sorted(rep["nodos"].items(), key=lambda x: x[1]["confianza"], reverse=True):
+        icon = "✅" if data["confianza"] >= 75 else "⚠️" if data["confianza"] <= 25 else "👤"
+        print(f" {icon} {nid[:20]}... → {data['confianza']}% (+{data['votos_positivos']}/-{data['votos_negativos']})")
+
+# ==================== ANONSURF ====================
+def anonsurf_status():
+    result = subprocess.getoutput("sudo anonsurf status 2>/dev/null | grep -i 'Tor is active'")
+    return "Tor is active" in result
+
+def anonsurf_test():
+    print("\n🧪 TEST DE ANONSURF")
+    ip_real = subprocess.getoutput("curl -s --max-time 5 ifconfig.me 2>/dev/null")
+    print(f"IP real: {ip_real}")
+    print("Activando Anonsurf...")
+    os.system("sudo anonsurf start > /dev/null 2>&1")
+    time.sleep(5)
+    ip_tor = subprocess.getoutput("proxychains -q curl -s --max-time 10 ifconfig.me 2>/dev/null")
+    print(f"IP Tor: {ip_tor}")
+    os.system("sudo anonsurf stop > /dev/null 2>&1")
+    restaurar_dns()
+    if ip_tor and ip_tor != ip_real:
+        print("✅ Anonsurf funciona correctamente")
+    else:
+        print("⚠️ Anonsurf tiene problemas")
+
+def anonsurf_start():
+    print("\n🕵️ Activando anonimato...")
+    os.system("sudo anonsurf start > /dev/null 2>&1")
+    time.sleep(5)
+    if anonsurf_status(): print("✅ Anonimato activado")
+    os.system("curl -s ifconfig.me")
+    print("")
+
+def anonsurf_stop():
+    print("\n❌ Desactivando anonimato...")
+    os.system("sudo anonsurf stop > /dev/null 2>&1")
+    restaurar_dns()
+    print("✅ IP real restaurada")
+    os.system("curl -s ifconfig.me")
+    print("")
+
+def anonsurf_change():
+    print("\n🔄 Cambiando identidad...")
+    os.system("sudo anonsurf change > /dev/null 2>&1")
+    time.sleep(4)
+    print("✅ Identidad cambiada")
+    os.system("curl -s ifconfig.me")
+    print("")
+
+def verificar_ip():
+    print("\n🌍 IP actual:")
+    os.system("curl -s ifconfig.me")
+    print("")
+
+def ejecutar_con_anonimo(cmd):
+    if anonsurf_status():
+        print(f"🕵️ Tor: {cmd}")
+        os.system(f"proxychains -q {cmd} 2>/dev/null")
+    else:
+        print(f"🔧 Directo: {cmd}")
+        os.system(cmd)
+
+# ==================== ENJAMBRE ====================
+def enjambre_init():
+    print("\n🐝 Inicializando nodo MaIA...")
+    os.makedirs(ENJAMBRE_DIR, exist_ok=True)
+    torrc_line = f"HiddenServiceDir {ONION_DIR}\nHiddenServicePort {PUERTO_P2P} 127.0.0.1:{PUERTO_P2P}"
+    torrc_content = subprocess.getoutput("sudo cat /etc/tor/torrc 2>/dev/null")
+    if "HiddenServiceDir /var/lib/tor/maia" not in torrc_content:
+        with open("/tmp/torrc_add.txt", "w") as f:
+            f.write(f"\n# MaIA Enjambre\n{torrc_line}\n")
+        os.system("sudo bash -c 'cat /tmp/torrc_add.txt >> /etc/tor/torrc'")
+        os.system("sudo systemctl restart tor")
+        os.system("rm /tmp/torrc_add.txt")
+    time.sleep(5)
+    result = subprocess.getoutput(f"sudo cat {ONION_DIR}/hostname 2>/dev/null")
+    if result:
+        print(f"\n✅ Servicio oculto activo: 🧅 {result.strip()}:{PUERTO_P2P}")
+        identidad = {"onion": result.strip(), "puerto": PUERTO_P2P, "creado": datetime.now().ctime()}
+        with open(os.path.join(ENJAMBRE_DIR, "identidad.json"), "w") as f:
+            json.dump(identidad, f, indent=2)
+    else:
+        print("❌ No se pudo generar la dirección onion")
+
+def enjambre_estado():
+    print("\n🐝 ESTADO DEL ENJAMBRE")
+    identidad_file = os.path.join(ENJAMBRE_DIR, "identidad.json")
+    if os.path.exists(identidad_file):
+        with open(identidad_file, "r") as f:
+            identidad = json.load(f)
+        print(f"🧅 Mi onion: {identidad['onion']}:{identidad['puerto']}")
+    else:
+        print("❌ Nodo no inicializado. Usá 'enjambre init'")
+    if os.path.exists(PEERS_FILE):
+        with open(PEERS_FILE, "r") as f:
+            peers = json.load(f)
+        print(f"🤝 Nodos conocidos: {len(peers)}")
+        for peer in peers:
+            print(f"   🧅 {peer['onion']}")
+
+def enjambre_unirse(onion=None):
+    print("\n🤝 Uniéndose al enjambre...")
+    if not onion:
+        onion = input("Dirección onion: ").strip()
+    if not onion.endswith('.onion'):
+        print("❌ Dirección no válida")
+        return
+    peers = []
+    if os.path.exists(PEERS_FILE):
+        with open(PEERS_FILE, "r") as f:
+            peers = json.load(f)
+    peer = {"onion": onion, "puerto": PUERTO_P2P, "agregado": datetime.now().ctime()}
+    if peer not in peers:
+        peers.append(peer)
+        with open(PEERS_FILE, "w") as f:
+            json.dump(peers, f, indent=2)
+        print(f"✅ Nodo {onion} agregado")
+    else:
+        print("⚠️ Nodo ya existente")
+
+def enjambre_compartir(dominio, ip):
+    print(f"\n📡 Compartiendo: {dominio} → {ip}")
+    identidad_file = os.path.join(ENJAMBRE_DIR, "identidad.json")
+    nodo_id = "local"
+    if os.path.exists(identidad_file):
+        with open(identidad_file, "r") as f:
+            identidad = json.load(f)
+            nodo_id = identidad.get("onion", "local")
+    hallazgos = {}
+    if os.path.exists(HALLZGOS_FILE):
+        with open(HALLZGOS_FILE, "r") as f:
+            hallazgos = json.load(f)
+    hallazgos[dominio] = {"dominio": dominio, "ip": ip, "timestamp": datetime.now().ctime(), "origen": nodo_id}
+    with open(HALLZGOS_FILE, "w") as f:
+        json.dump(hallazgos, f, indent=2)
+    actualizar_reputacion(nodo_id, 5, f"Aporte: {dominio}")
+
+def enjambre_buscar():
+    print("\n🔍 Buscando nodos en LAN...")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.settimeout(2)
+    sock.sendto(b"MAIA_DISCOVER", ('<broadcast>', PUERTO_P2P))
+    try:
+        while True:
+            data, addr = sock.recvfrom(1024)
+            if data.startswith(b"MAIA_NODE"):
+                print(f"   → Nodo encontrado: {addr[0]}")
+    except socket.timeout:
+        pass
+    sock.close()
+
+# ==================== ESCANEO ====================
+def encontrar_wordlist():
+    for p in ["/usr/share/wordlists/dirb/common.txt", "/usr/share/dirb/wordlists/common.txt"]:
+        if os.path.exists(p): return p
+    return None
+WORDLIST = encontrar_wordlist()
+
+def escanear(objetivo, modo="rapido"):
+    if modo == "rapido":
+        print(f"\n🔍 Escaneo rápido → {objetivo}")
+        ejecutar_con_anonimo(f"nmap -F {objetivo}")
+    elif modo == "version":
+        print(f"\n🔍 Escaneo versiones → {objetivo}")
+        ejecutar_con_anonimo(f"nmap -sV {objetivo}")
+    elif modo == "full":
+        print(f"\n🔍 Escaneo completo → {objetivo}")
+        ejecutar_con_anonimo(f"nmap -p- {objetivo}")
+
+def nikto_scan(objetivo):
+    print(f"\n🔍 Nikto → {objetivo}")
+    ejecutar_con_anonimo(f"nikto -h {objetivo}")
+
+def gobuster_scan(objetivo):
+    if not WORDLIST:
+        print("⚠️ Wordlist no encontrada")
+        return
+    print(f"\n🔍 Gobuster → {objetivo}")
+    ejecutar_con_anonimo(f"gobuster dir -u http://{objetivo} -w {WORDLIST} -t 30 -q -b 301,302,307,308")
+
+def analizar_dominio(dominio):
+    print(f"\n🔍 Analizando {dominio}...")
+    dns = subprocess.getoutput(f"dig +short {dominio}")
+    print(f"DNS: {dns}" if dns else "DNS: No responde")
+    cf = subprocess.getoutput(f"curl -sI https://{dominio} 2>/dev/null | grep -i 'cf-ray'")
+    print("Cloudflare: SI" if cf else "Cloudflare: NO")
+
+def buscar_ip_real(dominio):
+    print(f"\n🎯 Buscando IP real de {dominio}...")
+    ips = set()
+    for sub in ["www", "mail", "ftp", "admin", "cpanel", "blog", "api", "dev", "test", "old"]:
+        result = subprocess.getoutput(f"dig +short {sub}.{dominio} | head -1")
+        if result and re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', result):
+            if not result.startswith(("104.", "172.", "192.168.", "10.", "127.")):
+                ips.add(result)
+                print(f"   → {sub}.{dominio} → {result}")
+    if ips:
+        print(f"\n✅ Encontradas {len(ips)} IPs:")
+        for i, ip in enumerate(sorted(ips), 1):
+            print(f"   {i}. {ip}")
+        if input("\n📡 ¿Compartir con el enjambre? (s/n): ").lower() in ["s", "si", "sí"]:
+            for ip in ips:
+                enjambre_compartir(dominio, ip)
+    else:
+        print("❌ No se encontraron IPs reales.")
+
+# ==================== IA ====================
+def ejecutar_comando_manual(cmd):
+    print(f"\n🔧 Ejecutando: {cmd}")
+    if input("🛠️ ¿Autorizás? (s/n): ").lower() in ["s", "si", "sí"]:
+        with open(LOG_FILE, "a") as f:
+            f.write(f"\n--- [{datetime.now().ctime()}] ---\nCOMANDO: {cmd}\n")
+        ejecutar_con_anonimo(cmd + " | tee -a " + LOG_FILE)
+        print("✅ Comando ejecutado.")
+    else:
+        print("⏭️ Cancelado.")
+
+def mostrar_ayuda():
+    print("""
+🐝 MaIA v5.20 - Comandos
+======================================================================
+🔐 ANONIMATO: anonimato test | activar | desactivar | cambiar | mi ip
+🐝 ENJAMBRE: enjambre init | estado | unirse onion | buscar | compartir dominio ip
+⭐ REPUTACION: reputacion
+🔍 RECONOCIMIENTO: analizar dominio.com | ipreal dominio.com
+🛡️ ESCANEO: nmap | nmapv | nmapfull | nikto | gobuster dominio.com
+💬 OTROS: !ejecutar comando | ayuda | salir
+======================================================================
+""")
+
+def main():
+    print("\n🐝 MaIA v5.20 - MAMANGA INTELLIGENCE ASSISTANT")
+    print("   Nodo .248 | Corrientes, Argentina | Soberanía tecnológica o nada. 🧉\n")
+    print("💡 Escribí 'ayuda' para ver comandos\n")
+
+    system_prompt = "Sos MaIA, IA argentina de auditoría. Directa, práctica, sin vueltas. NO ejecutes comandos automáticamente."
+    messages = [{"role": "system", "content": system_prompt}]
+
+    while True:
+        try:
+            user = input("Vos 🧉> ").strip()
+            if not user: continue
+            if user.lower() in ["salir", "q", "exit"]: break
+            if user.lower() == "ayuda": mostrar_ayuda(); continue
+            if user.lower() == "reputacion": mostrar_reputacion(); continue
+            if user.lower() == "anonimato test": anonsurf_test(); continue
+            elif user.lower() == "anonimato activar": anonsurf_start(); continue
+            elif user.lower() == "anonimato desactivar": anonsurf_stop(); continue
+            elif user.lower() == "anonimato cambiar": anonsurf_change(); continue
+            elif user.lower() == "mi ip": verificar_ip(); continue
+            if user.lower() == "enjambre init": enjambre_init(); continue
+            elif user.lower() == "enjambre estado": enjambre_estado(); continue
+            elif user.lower() == "enjambre buscar": enjambre_buscar(); continue
+            elif user.lower().startswith("enjambre unirse"):
+                partes = user.split()
+                enjambre_unirse(partes[2] if len(partes) > 2 else None)
+                continue
+            elif user.lower().startswith("enjambre compartir"):
+                partes = user.split()
+                if len(partes) >= 4:
+                    enjambre_compartir(partes[2], partes[3])
+                else:
+                    print("Uso: enjambre compartir dominio.com 1.2.3.4")
+                continue
+            if user.lower().startswith("nmapfull "): escanear(user[8:].strip(), "full"); continue
+            elif user.lower().startswith("nmapv "): escanear(user[5:].strip(), "version"); continue
+            elif user.lower().startswith("nmap "): escanear(user[5:].strip(), "rapido"); continue
+            elif user.lower().startswith("nikto "): nikto_scan(user[6:].strip()); continue
+            elif user.lower().startswith("analizar "): analizar_dominio(user[8:].strip()); continue
+            elif user.lower().startswith("ipreal "): buscar_ip_real(user[7:].strip()); continue
+            elif user.lower().startswith("gobuster "): gobuster_scan(user[8:].strip()); continue
+            if user.startswith("!ejecutar"):
+                cmd = user[9:].strip()
+                if cmd: ejecutar_comando_manual(cmd)
+                else: print("Uso: !ejecutar comando")
+                continue
+            messages.append({"role": "user", "content": user})
+            try:
+                r = requests.post(URL_API, headers={"Authorization": f"Bearer {API_KEY}"}, json={"model": MODELO, "messages": messages, "temperature": 0.8, "max_tokens": 800}, timeout=35)
+                if r.status_code == 200:
+                    reply = r.json()["choices"][0]["message"]["content"].strip()
+                    print(f"\nIA 🤖> {reply}\n")
+                else:
+                    print(f"⚠️ Error API: {r.status_code}")
+            except Exception as e:
+                print(f"⚠️ Error: {e}")
+        except KeyboardInterrupt:
+            print("\n👋 Interrumpido.")
+            break
+        except Exception as e:
+            print(f"⚠️ Error: {e}")
+
+if __name__ == "__main__":
+    main()
