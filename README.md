@@ -151,7 +151,7 @@ Vos 🧉> enjambre init
 ✅ Servicio oculto activo: 🧅 u2e6mrhtz56uq...onion:9876
 
 Vos 🧉> analizar radi......com
-DNS: 208.77.22.107
+DNS: 208.77.xxxxxxxxx
 Cloudflare: NO
 
 Vos 🧉> nmap radio...com
